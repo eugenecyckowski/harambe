@@ -18,6 +18,10 @@
 #
 # Harambe replies to workers via `tmux send-keys` into the worker's session.
 # No return-path plumbing needed on this side.
+#
+# Style: messages should be signal-dense. One sentence if one sentence works.
+# Every "hey Harambe, I wanted to let you know that..." preamble is tokens
+# spent for no reader value. Lead with the thing — blocker, milestone, ask.
 
 set -euo pipefail
 

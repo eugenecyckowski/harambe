@@ -78,6 +78,8 @@ Every `claude` spawn specifies `--model` explicitly. Default: `sonnet` — handl
 
 Each repo has its own `CLAUDE.md` (team conventions) and often `CLAUDE.local.md` (user prefs). Workers auto-load both. **Don't restate stable context** — trust the repo's files.
 
+**Also brief for terseness.** Headless workers run long and nobody reads their output in real time. Include a line in the brief: "write dense — no preambles, no 'I'll now...', no restating the brief, no closing summaries." `spawn-worker.sh` already appends a terseness directive for non-remote-control workers; a reminder in the brief itself reinforces it. Signal-dense reports save real tokens over the life of a long session.
+
 | Put in the brief | Leave to the repo's CLAUDE files |
 |---|---|
 | Specific feature / bug description | Coding standards, conventions |
@@ -144,6 +146,7 @@ The script writes a timestamped markdown file to `$HARAMBE_ROOT/inbox/` and, if 
 - Never delete inbox files — always `mv` to archive.
 - Replies go via the worker's tmux session, not return-channel files.
 - If a worker's tmux session is gone, note it for the user and archive without replying.
+- Expect signal-dense messages from workers (one sentence if one sentence works). When replying, match the register — dense, no ceremony. Saves tokens on both sides.
 
 ---
 

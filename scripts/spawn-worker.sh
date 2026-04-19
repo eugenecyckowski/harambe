@@ -101,7 +101,18 @@ RC_WAIT=3     # extra seconds after priming before engaging remote control
 # The only character that would break this is a literal single quote; if you
 # ever need to add "it's" or similar, either escape it with '\'' or switch
 # to a co-located .txt file and `cat` it in.
-PRIMING_PROMPT='Read .harambe-brief.md and execute it. When done, write WORKER_REPORT.md in this worktree root with: status (done/blocked/failed), one-line summary, changed files, any notes the user should see.'
+#
+# Headless workers (no remote control) get a terseness directive — they run
+# long, nobody reads their output in real time, and every preamble paragraph
+# is tokens spent for nothing. "Dense prose, no ceremony" beats caveman-speak
+# because grep-ability and nuance still matter in reports.
+PRIMING_PROMPT_BASE='Read .harambe-brief.md and execute it. When done, write WORKER_REPORT.md in this worktree root with: status (done/blocked/failed), one-line summary, changed files, any notes the user should see.'
+PRIMING_TERSE=' You are a headless worker — nobody reads your output in real time. Write dense: no preambles, no restating the brief, no "I'\''ll now..." narration, no closing summaries of what you just did. Just the work and the result. Ping Harambe (via ~/repos/harambe/bin/harambe-say) only for blockers or handoff-worthy milestones, and keep pings to one sentence when one works. Same rule in WORKER_REPORT.md: terse, scannable, signal-dense.'
+if [ "$REMOTE_CONTROL" -eq 1 ]; then
+  PRIMING_PROMPT="$PRIMING_PROMPT_BASE"
+else
+  PRIMING_PROMPT="$PRIMING_PROMPT_BASE$PRIMING_TERSE"
+fi
 
 # -- sanity checks ----------------------------------------------------------
 
