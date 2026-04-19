@@ -1,0 +1,91 @@
+# Personal Overlay — {{YOUR_NAME}}
+
+This file is loaded by `CLAUDE.md`'s `@`-include at the bottom. It's not committed — it's your personal overlay.
+
+Brief profile of who you are and what you work on. This is context Harambe carries into every conversation — role, strengths, areas where you want more explanation, anything personal that shapes how it should assist you.
+
+Example:
+> I'm a backend engineer at {{COMPANY}} focused on payments infrastructure. Strong in distributed systems and Go; want more explanation on frontend work (React, CSS, accessibility). I prefer terse, technical answers with concrete examples over hand-holding prose.
+
+---
+
+## Voice
+
+Describe the voice Harambe should use when talking to you. Some examples:
+
+- **Dry & British** — "Think Stephen Fry texting back quickly — well-read, amused, slightly weary."
+- **Plainspoken American engineer** — "No jargon, no fluff, no emoji. Direct."
+- **Warm mentor** — "Patient, context-rich, explains reasoning. Never condescending."
+
+Include specifics: opening style, register, when to quiet down (production incident, late at night), whether self-deprecation is welcome, etc. The more concrete, the better Harambe's voice will land.
+
+---
+
+## Your Workspace
+
+### Repos on this machine
+List the repos Harambe might touch, with a one-line purpose each. Example:
+
+- `~/repos/{{MAIN_REPO}}` — main application. Primary workplace. Has its own `CLAUDE.md`.
+- `~/repos/{{SECOND_REPO}}` — {{PURPOSE}}.
+
+### Key workflow rules
+Anything non-obvious about how you work:
+- How to run tests, lint, build.
+- Package manager (yarn vs npm vs pnpm — pick one and be explicit).
+- Pre-PR checklists (e.g. "always run the full test suite locally").
+- Tools to prefer vs avoid.
+
+### External systems
+Name the systems Harambe should know about:
+- **Ticket tracker** — Linear / Jira / GitHub Issues. How tickets are referenced (e.g. `PROJ-123`).
+- **Team comms** — Slack / Teams / Discord. Which workspace.
+- **Source control** — GitHub org, GitLab group, etc.
+- **Docs** — Confluence, Notion, internal wiki.
+- **Error tracking** — Sentry, Honeybadger, Rollbar.
+
+Point Harambe at the right skill for each (e.g. "Use the `linear-server` MCP tools for Linear").
+
+---
+
+## Useful Skills (curated)
+
+Your curated list of skills. Skills cascade automatically from the plugins you have installed — this section is just "these are the ones I reach for often, in roughly these situations."
+
+Organize by workflow stage:
+
+### Planning & thinking
+- `superpowers:brainstorming` — explore requirements before implementation
+- `compound-engineering:ce-plan` — multi-step plans
+
+### Research
+- `compound-engineering:research:framework-docs-researcher` — official docs for frameworks
+
+### Dev workflow
+- `{{YOUR_TEAM_PLUGIN}}:issue-to-draft-pr` — ticket → plan → implement → PR
+
+### PR/commit management
+- `pr-status` — check PR status and CI
+
+### Communication
+- `slack:standup` — generate standup from recent Slack activity
+
+### Debugging & verification
+- `superpowers:systematic-debugging` — before proposing fixes
+
+### Where new skills live
+
+Document the hierarchy of skill locations you use:
+
+| Location | Scope |
+|---|---|
+| `~/repos/{{TEAM_PLUGIN}}/` | Team, everywhere |
+| `~/.claude/skills/` | Personal, everywhere |
+| `~/repos/harambe/.claude/skills/` | Harambe only |
+| `<repo>/.claude/skills/` | That repo only |
+
+---
+
+## Device / environment notes (optional)
+
+Anything physical Harambe should know: your phone model + UDID for mobile work, device names for SSH, preferred terminal, shell, etc.

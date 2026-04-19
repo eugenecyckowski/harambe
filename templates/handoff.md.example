@@ -1,0 +1,24 @@
+# Handoff — YYYY-MM-DD
+
+## Standing instructions
+
+<!-- Items Harambe checks on every heartbeat. Empty = nothing autonomous to do. -->
+<!-- Format: `- [ ] <instruction>`. Harambe ticks, updates, and removes items. -->
+
+_(none)_
+
+## What happened
+
+- Short bullets of what got done in the session.
+
+## In progress
+
+- What's actively being worked on, with enough context to pick up cold.
+
+## Pick up next
+
+- The obvious next step(s) if you had another hour.
+
+## Known issues / gotchas
+
+- Anything surprising you discovered, sharp edges to watch for.

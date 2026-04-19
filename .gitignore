@@ -1,0 +1,24 @@
+# runtime state — machine-local, not repo knowledge
+state/*
+!state/.gitkeep
+
+# worker → Harambe mailbox, local only (repo root only, not brain/inbox/)
+/inbox/
+/inbox-archive/
+
+# personal overlay — never committed to the shared repo
+CLAUDE.local.md
+handoff.md
+overlay/
+
+# brain vault: keep structure + generic docs, ignore user content
+brain/*/*.md
+!brain/CLAUDE.md
+!brain/templates/**
+!brain/**/.gitkeep
+
+# rendered plists live in ~/Library/LaunchAgents/, not here
+scripts/com.harambe.*.plist
+
+# private research artifacts
+research/

@@ -1,0 +1,360 @@
+#!/bin/bash
+# harambe — control the Harambe assistant.
+# One command to rule them all. Run `harambe help` for usage.
+
+set -euo pipefail
+
+SESSION="harambe"
+TRIGGER="/tmp/harambe-reset"
+LOG="/tmp/harambe-watchdog.log"
+CMD='claude --dangerously-skip-permissions'
+BOOT_WAIT=10  # seconds before Claude is ready to accept /remote-control (matches watchdog)
+
+HARAMBE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WATCHDOG="$HARAMBE_ROOT/scripts/harambe-watchdog.sh"
+PLIST_TMPL="$HARAMBE_ROOT/scripts/com.harambe.watchdog.plist.template"
+PLIST_DST="$HOME/Library/LaunchAgents/com.harambe.watchdog.plist"
+PLIST_LABEL="com.harambe.watchdog"
+HEARTBEAT_PLIST_TMPL="$HARAMBE_ROOT/scripts/com.harambe.heartbeat.plist.template"
+HEARTBEAT_PLIST_DST="$HOME/Library/LaunchAgents/com.harambe.heartbeat.plist"
+HEARTBEAT_PLIST_LABEL="com.harambe.heartbeat"
+
+# Render a plist template to a destination, substituting {{HARAMBE_ROOT}} and
+# {{HOME}}. Fails if the template or parent dir isn't usable.
+render_plist() {
+  local tmpl="$1" dst="$2"
+  [ -f "$tmpl" ] || { echo "template not found: $tmpl" >&2; return 1; }
+  mkdir -p "$(dirname "$dst")"
+  sed -e "s|{{HARAMBE_ROOT}}|$HARAMBE_ROOT|g" \
+      -e "s|{{HOME}}|$HOME|g" \
+      "$tmpl" > "$dst"
+}
+
+# -- helpers -----------------------------------------------------------------
+
+has_session() { tmux has-session -t "$SESSION" 2>/dev/null; }
+
+watchdog_state() {
+  # Echoes one of: launchd | nohup | none
+  if launchctl list 2>/dev/null | grep -q "$PLIST_LABEL"; then
+    echo "launchd"
+  elif pgrep -f "harambe-watchdog.sh" >/dev/null 2>&1; then
+    echo "nohup"
+  else
+    echo "none"
+  fi
+}
+
+start_watchdog() {
+  case "$(watchdog_state)" in
+    launchd) echo "Watchdog already running (launchd)." ;;
+    nohup)   echo "Watchdog already running (nohup)." ;;
+    none)
+      if [ -f "$PLIST_DST" ]; then
+        launchctl load "$PLIST_DST"
+        echo "Watchdog started (launchd, survives reboot)."
+      else
+        nohup "$WATCHDOG" > /dev/null 2>&1 &
+        disown || true
+        echo "Watchdog started (nohup, dies on reboot)."
+        echo "  → for reboot persistence: harambe install-launchd"
+      fi
+      ;;
+  esac
+}
+
+enter_remote_control_bg() {
+  # Wait for Claude to finish booting, then auto-type /remote-control.
+  # Backgrounded so `harambe start` returns immediately; disowned so it
+  # survives the shell that invoked us.
+  (
+    sleep "$BOOT_WAIT"
+    tmux send-keys -t "$SESSION" '/remote-control' Enter 2>/dev/null
+  ) &
+  disown 2>/dev/null || true
+}
+
+stop_watchdog() {
+  case "$(watchdog_state)" in
+    launchd) launchctl unload "$PLIST_DST" 2>/dev/null && echo "Watchdog stopped (launchd)." ;;
+    nohup)   pkill -f "harambe-watchdog.sh" 2>/dev/null && echo "Watchdog stopped (nohup)." ;;
+    none)    echo "Watchdog not running." ;;
+  esac
+}
+
+# -- commands ----------------------------------------------------------------
+
+cmd_start() {
+  if has_session; then
+    echo "Session '$SESSION' already running."
+  else
+    tmux new-session -d -s "$SESSION" "$CMD"
+    echo "Started tmux session '$SESSION'."
+    enter_remote_control_bg
+    echo "Auto-entering /remote-control in ${BOOT_WAIT}s once Claude finishes booting."
+  fi
+  start_watchdog
+  echo
+  echo "Next: harambe attach."
+}
+
+cmd_stop() {
+  stop_watchdog
+  if has_session; then
+    tmux kill-session -t "$SESSION"
+    echo "Session '$SESSION' killed."
+  fi
+}
+
+cmd_reset() {
+  if ! has_session; then
+    echo "No session running. Use 'harambe start' instead."
+    exit 1
+  fi
+  touch "$TRIGGER"
+  echo "Reset triggered. ~5s for watchdog + 10s boot wait."
+}
+
+cmd_attach() {
+  if ! has_session; then
+    echo "No session. Run: harambe start"
+    exit 1
+  fi
+  exec tmux attach -t "$SESSION"
+}
+
+cmd_status() {
+  printf "session:     "
+  has_session && echo "running" || echo "not running"
+  printf "watchdog:    "
+  case "$(watchdog_state)" in
+    launchd) echo "running (launchd)" ;;
+    nohup)   echo "running (nohup, won't survive reboot)" ;;
+    none)    echo "not running" ;;
+  esac
+  printf "launchd:     "
+  [ -f "$PLIST_DST" ] && echo "installed" || echo "not installed"
+  printf "heartbeat:   "
+  local hb_interval
+  hb_interval="$(current_interval)"
+  local hb_interval_suffix=""
+  [ -n "$hb_interval" ] && hb_interval_suffix=" (interval ${hb_interval}s)"
+  if [ -f "$HARAMBE_ROOT/state/heartbeat-paused" ]; then
+    echo "paused${hb_interval_suffix}"
+  elif grep -q "com.harambe.heartbeat" < <(launchctl list 2>/dev/null); then
+    echo "active (launchd)${hb_interval_suffix}"
+  else
+    echo "not installed${hb_interval_suffix}"
+  fi
+  if [ -f "$TRIGGER" ]; then
+    echo "pending:     reset trigger exists"
+  fi
+  echo
+  if [ -f "$HARAMBE_ROOT/state/heartbeat.log" ]; then
+    echo "last 5 heartbeat log lines:"
+    tail -5 "$HARAMBE_ROOT/state/heartbeat.log" | sed 's/^/  /'
+  fi
+}
+
+cmd_logs() {
+  if [ ! -f "$LOG" ]; then
+    echo "No log yet at $LOG. Has the watchdog ever run?"
+    exit 1
+  fi
+  exec tail -f "$LOG"
+}
+
+cmd_install_launchd() {
+  render_plist "$PLIST_TMPL" "$PLIST_DST"
+  # unload first in case an old one is loaded
+  launchctl unload "$PLIST_DST" 2>/dev/null || true
+  launchctl load "$PLIST_DST"
+  echo "Installed watchdog: $PLIST_DST (survives reboot)."
+}
+
+cmd_uninstall_launchd() {
+  launchctl unload "$PLIST_DST" 2>/dev/null || true
+  rm -f "$PLIST_DST"
+  echo "Uninstalled watchdog launchd plist."
+}
+
+cmd_install_heartbeat() {
+  render_plist "$HEARTBEAT_PLIST_TMPL" "$HEARTBEAT_PLIST_DST"
+  launchctl unload "$HEARTBEAT_PLIST_DST" 2>/dev/null || true
+  launchctl load "$HEARTBEAT_PLIST_DST"
+  echo "Installed heartbeat: $HEARTBEAT_PLIST_DST (timer loaded)."
+}
+
+cmd_uninstall_heartbeat() {
+  launchctl unload "$HEARTBEAT_PLIST_DST" 2>/dev/null || true
+  rm -f "$HEARTBEAT_PLIST_DST"
+  echo "Uninstalled heartbeat launchd plist."
+}
+
+parse_duration() {
+  # Accepts: 300, 300s, 5m, 1h. Echoes seconds. Exits non-zero on bad input.
+  local input="$1"
+  if [[ "$input" =~ ^([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$input" =~ ^([0-9]+)s$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$input" =~ ^([0-9]+)m$ ]]; then
+    echo $(( BASH_REMATCH[1] * 60 ))
+  elif [[ "$input" =~ ^([0-9]+)h$ ]]; then
+    echo $(( BASH_REMATCH[1] * 3600 ))
+  else
+    return 1
+  fi
+}
+
+current_interval() {
+  # Reads StartInterval from the installed plist (fall back to template).
+  # Echoes empty string if unreadable.
+  local plist
+  if [ -f "$HEARTBEAT_PLIST_DST" ]; then
+    plist="$HEARTBEAT_PLIST_DST"
+  else
+    plist="$HEARTBEAT_PLIST_TMPL"
+  fi
+  /usr/libexec/PlistBuddy -c "Print :StartInterval" "$plist" 2>/dev/null || true
+}
+
+cmd_interval() {
+  local arg="${1:-}"
+  if [ -z "$arg" ]; then
+    local cur
+    cur="$(current_interval)"
+    if [ -n "$cur" ]; then
+      echo "Current heartbeat interval: ${cur}s"
+    else
+      echo "Could not read current interval from plist."
+    fi
+    echo "Usage: harambe interval <duration>   (e.g. 30s, 5m, 1h, 300)"
+    return
+  fi
+
+  local seconds
+  if ! seconds="$(parse_duration "$arg")"; then
+    echo "Bad duration: '$arg'. Use 30s, 5m, 1h, or raw seconds." >&2
+    exit 1
+  fi
+  if [ "$seconds" -lt 10 ]; then
+    echo "Refusing interval < 10s (launchd minimum guardrail)." >&2
+    exit 1
+  fi
+
+  # Only touch the installed plist — the source plist in scripts/ is a
+  # committed template and stays at the default interval. User's runtime
+  # choice lives in ~/Library/LaunchAgents/ only.
+  if [ ! -f "$HEARTBEAT_PLIST_DST" ]; then
+    echo "Heartbeat plist is not installed at $HEARTBEAT_PLIST_DST." >&2
+    echo "Install first with: harambe install-heartbeat" >&2
+    exit 1
+  fi
+  /usr/libexec/PlistBuddy -c "Set :StartInterval ${seconds}" "$HEARTBEAT_PLIST_DST"
+  # Reload if launchd has it registered, so the new interval takes effect.
+  # Note: use process substitution (not a pipe) — `grep -q` exits early on
+  # first match, which triggers SIGPIPE on launchctl list, and pipefail then
+  # returns non-zero, fooling the `if`. Process substitution avoids the pipe.
+  if grep -q "$HEARTBEAT_PLIST_LABEL" < <(launchctl list 2>/dev/null); then
+    launchctl unload "$HEARTBEAT_PLIST_DST" 2>/dev/null || true
+    launchctl load "$HEARTBEAT_PLIST_DST"
+    echo "Heartbeat interval set to ${seconds}s and reloaded in launchd."
+  else
+    echo "Heartbeat interval set to ${seconds}s (plist updated; not currently loaded)."
+  fi
+
+  if [ -f "$HARAMBE_ROOT/state/heartbeat-paused" ]; then
+    echo "  (Heartbeat is currently PAUSED. Run 'harambe resume' to start ticking.)"
+  fi
+}
+
+cmd_pause() {
+  mkdir -p "$HARAMBE_ROOT/state"
+  touch "$HARAMBE_ROOT/state/heartbeat-paused"
+  echo "Heartbeat paused. Resume with: harambe resume"
+}
+
+cmd_resume() {
+  if [ ! -f "$HARAMBE_ROOT/state/heartbeat-paused" ]; then
+    echo "Heartbeat is not paused."
+    return
+  fi
+  rm -f "$HARAMBE_ROOT/state/heartbeat-paused"
+  echo "Heartbeat resumed."
+}
+
+cmd_heartbeat() {
+  local tick_script="$HARAMBE_ROOT/scripts/heartbeat-tick.sh"
+  if [ ! -x "$tick_script" ]; then
+    echo "heartbeat-tick.sh not found at $tick_script" >&2
+    exit 1
+  fi
+  # Manual fire always bypasses the quiet window so the user can force a tick
+  # while in conversation for testing.
+  if [ "${1:-}" = "--dry-run" ]; then
+    "$tick_script" --dry-run --force
+    echo "Dry run complete. Last log line:"
+    if [ -f "$HARAMBE_ROOT/state/heartbeat.log" ]; then
+      tail -1 "$HARAMBE_ROOT/state/heartbeat.log"
+    else
+      echo "(no log yet)"
+    fi
+  else
+    "$tick_script" --force
+    echo "Heartbeat fired."
+  fi
+}
+
+cmd_help() {
+  cat <<'EOF'
+harambe — control the Harambe assistant
+
+Daily use:
+  harambe start              Start the tmux session + watchdog
+  harambe attach             Attach to the running session (detach: Ctrl-b d)
+  harambe reset              Trigger a fresh-context restart (~15s)
+  harambe status             What's running, what isn't, last heartbeats
+  harambe logs               Tail the watchdog log
+  harambe stop               Kill session + stop watchdog
+
+Heartbeat:
+  harambe pause              Pause autonomous heartbeat ticks
+  harambe resume             Resume heartbeat ticks
+  harambe heartbeat          Fire a heartbeat now (bypasses quiet window)
+  harambe heartbeat --dry-run  Log what would happen; don't send keys
+  harambe interval           Show current interval
+  harambe interval <dur>     Set interval (e.g. 30s, 5m, 1h, 300); reloads launchd
+
+Setup:
+  harambe install-launchd      Install watchdog launchd plist (survives reboot)
+  harambe uninstall-launchd    Remove watchdog launchd entry
+  harambe install-heartbeat    Install heartbeat launchd timer
+  harambe uninstall-heartbeat  Remove heartbeat launchd entry
+
+Tip:
+  Drop this in your shell rc for ergonomics:
+    alias h='~/repos/harambe/bin/harambe'
+EOF
+}
+
+# -- dispatch ----------------------------------------------------------------
+
+case "${1:-help}" in
+  start)             cmd_start ;;
+  stop)              cmd_stop ;;
+  reset)             cmd_reset ;;
+  attach)            cmd_attach ;;
+  status)            cmd_status ;;
+  logs)              cmd_logs ;;
+  install-launchd)     cmd_install_launchd ;;
+  uninstall-launchd)   cmd_uninstall_launchd ;;
+  install-heartbeat)   cmd_install_heartbeat ;;
+  uninstall-heartbeat) cmd_uninstall_heartbeat ;;
+  pause)             cmd_pause ;;
+  resume)            cmd_resume ;;
+  heartbeat)         shift; cmd_heartbeat "$@" ;;
+  interval)          shift; cmd_interval "$@" ;;
+  help|-h|--help|"") cmd_help ;;
+  *)                 echo "Unknown command: $1"; echo; cmd_help; exit 1 ;;
+esac

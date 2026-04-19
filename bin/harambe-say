@@ -1,0 +1,110 @@
+#!/bin/bash
+# harambe-say — worker → Harambe ping.
+#
+# Usage:
+#   harambe-say "Stuck on X, need your take."
+#   echo "longer message" | harambe-say
+#   harambe-say --from voice-qa-6 "Ready for review"
+#
+# Writes a timestamped markdown file into ~/repos/harambe/inbox/, then (if
+# Harambe's tmux pane is alive) sends the word `inbox` into it so Harambe
+# notices and processes the mailbox. If Harambe is offline, the message
+# sits in the inbox until next boot — no lost pings, no daemon, no drama.
+#
+# Rate-limited pings: to avoid interrupting the user mid-conversation, the
+# `inbox` trigger is suppressed if the inbox already had unread messages
+# AND Harambe was pinged within the past 5 min. Messages still land in
+# the inbox; Harambe picks them up on the next trigger or boot.
+#
+# Harambe replies to workers via `tmux send-keys` into the worker's session.
+# No return-path plumbing needed on this side.
+
+set -euo pipefail
+
+HARAMBE_ROOT="${HARAMBE_ROOT:-$HOME/repos/harambe}"
+INBOX="$HARAMBE_ROOT/inbox"
+SESSION="${HARAMBE_SESSION:-harambe}"
+
+# Default sender: the caller's tmux session name, or "unknown" if not in tmux.
+FROM="${HARAMBE_SAY_FROM:-}"
+if [ -z "$FROM" ]; then
+  FROM="$(tmux display-message -p '#S' 2>/dev/null || echo unknown)"
+fi
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --from)
+      [ $# -ge 2 ] || { echo "harambe-say: --from needs a value" >&2; exit 2; }
+      FROM="$2"; shift 2 ;;
+    --help|-h)
+      awk 'NR>=2 && NR<=16 { sub(/^# ?/, ""); print }' "$0"
+      exit 0 ;;
+    --) shift; break ;;
+    -*) echo "harambe-say: unknown flag '$1'" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+# Body: args if given, otherwise stdin.
+if [ $# -gt 0 ]; then
+  BODY="$*"
+else
+  BODY="$(cat)"
+fi
+
+if [ -z "${BODY//[[:space:]]/}" ]; then
+  echo "harambe-say: empty message (pass args or pipe stdin)" >&2
+  exit 2
+fi
+
+# Sanitize sender for filename: keep alnum/dash/underscore only.
+SAFE_FROM="${FROM//[^A-Za-z0-9_-]/-}"
+SAFE_FROM="${SAFE_FROM:-unknown}"
+
+mkdir -p "$INBOX"
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+# $$ disambiguates two simultaneous calls from the same sender.
+FILE="$INBOX/${TS}-${SAFE_FROM}-$$.md"
+
+{
+  printf 'from: %s\n' "$FROM"
+  printf 'at:   %s\n' "$TS"
+  printf '\n'
+  printf '%s\n' "$BODY"
+} > "$FILE"
+
+# Nudge Harambe if the pane is alive. Rate-limited: skip the trigger when
+# the inbox already had pre-existing messages AND we pinged within the
+# past 5 min — the file still lands, Harambe just isn't interrupted again.
+STATE_DIR="$HARAMBE_ROOT/state"
+LAST_PING_FILE="$STATE_DIR/last-inbox-notification"
+RATE_LIMIT_SECS="${HARAMBE_PING_RATE_LIMIT_SECS:-300}"
+
+should_ping() {
+  local inbox_count last_ts now age
+  inbox_count="$(find "$INBOX" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')"
+  # Only our own message sitting there — first interrupt, always ping.
+  [ "$inbox_count" -le 1 ] && return 0
+  # Never pinged before — ping.
+  [ -f "$LAST_PING_FILE" ] || return 0
+  last_ts="$(cat "$LAST_PING_FILE" 2>/dev/null || echo 0)"
+  now="$(date -u +%s)"
+  age=$(( now - last_ts ))
+  [ "$age" -ge "$RATE_LIMIT_SECS" ]
+}
+
+STATUS="queued"
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  if should_ping; then
+    tmux send-keys -t "$SESSION" 'inbox' Enter 2>/dev/null || true
+    mkdir -p "$STATE_DIR"
+    date -u +%s > "$LAST_PING_FILE"
+    STATUS="notified"
+  else
+    STATUS="rate-limited"
+  fi
+else
+  STATUS="offline"
+fi
+
+printf 'delivered: %s (%s)\n' "$FILE" "$STATUS"
