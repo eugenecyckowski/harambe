@@ -155,9 +155,10 @@ The script writes a timestamped markdown file to `$HARAMBE_ROOT/inbox/` and, if 
 A launchd timer fires on an interval (default every 5 minutes) and sends the literal word `heartbeat` into Harambe's tmux pane. When you receive `heartbeat` as user input:
 
 1. **Check the inbox** first (see above).
-2. **Read `$HARAMBE_ROOT/handoff.md`.** Two things to watch for:
+2. **Read `$HARAMBE_ROOT/handoff.md`.** Three things to watch for:
    - **`## Active chains`** — if present, invoke the `chain` skill to advance each chain one step (check current worker, advance if done, spawn next step). See `.claude/skills/chain.md` for the full protocol.
    - **"Standing instructions"** — the general work list.
+   - **Proactive checks** — if a standing instruction mentions `proactive checks` or names any of `linear-triage`, `pr-watch`, `review-requests`, run those skills (findings append under `## Recent proactive findings` in handoff.md and stay silent when nothing has changed).
 3. **Execute** the standing instructions using the same delegation rules as always.
 4. **Update `handoff.md`:**
    - Tick completed items (`- [x]`).
