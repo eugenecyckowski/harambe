@@ -16,12 +16,17 @@ Watches the user's open PRs and surfaces what's changed since the last tick.
 
 ### 1. List the user's open PRs — all repos
 
+Use `gh search prs` (cross-repo, cross-org) with both `--author=@me` AND `--assignee=@me` and merge the results (dedupe by `repository.nameWithOwner#number`). A PR the user is assigned-but-didn't-author is still their problem to watch.
+
 ```bash
-gh pr list --author @me --state open --limit 50 \
-  --json number,title,url,updatedAt,headRefName,baseRefName,mergeable,reviewDecision,reviewRequests,latestReviews,comments,statusCheckRollup,repository
+gh search prs --state=open --author=@me --limit 100 \
+  --json number,title,url,repository,updatedAt,author
+
+gh search prs --state=open --assignee=@me --limit 100 \
+  --json number,title,url,repository,updatedAt,author
 ```
 
-`--author @me` covers every repo/org the user has access to.
+For each PR in the merged set, fetch full detail with `gh pr view <num> --repo <org/repo> --json ...` to get `mergeable`, `reviewDecision`, `latestReviews`, `statusCheckRollup`, `comments`. Do NOT use `gh pr list` — it's cwd/repo-scoped and silently returns nothing when run outside a repo.
 
 ### 2. Diff against state
 
